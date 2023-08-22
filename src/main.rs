@@ -41,8 +41,8 @@ enum MysqlValue {
 #[derive(Debug, Default)]
 struct SqlStruct {
     table_infos: Vec<TableInfo>,
-    select_fields: Vec<String>,
-    insert_fields: HashMap<String, MysqlValue>,
+    get_fields: Vec<String>,
+    set_fields: HashMap<String, MysqlValue>,
     order_by_fields: HashMap<String, bool>,
     limit: Option<i32>,
     offset: Option<i32>,
@@ -67,7 +67,7 @@ impl Display for SqlStruct {
 
         let mut select_fields_str = String::new();
         select_fields_str.push_str("[");
-        for select_field in &self.select_fields {
+        for select_field in &self.get_fields {
             select_fields_str.push_str(select_field);
             select_fields_str.push_str(", ");
         }
@@ -79,21 +79,21 @@ impl Display for SqlStruct {
 
         select_fields_str.push_str("]");
 
-        let mut insert_fields_str = String::new();
-        insert_fields_str.push_str("[");
-        for (k, v) in &self.insert_fields {
-            insert_fields_str.push_str(k);
-            insert_fields_str.push_str("=");
-            insert_fields_str.push_str(&*format!("{:?}", v));
-            insert_fields_str.push_str(", ");
+        let mut set_fields_str = String::new();
+        set_fields_str.push_str("[");
+        for (k, v) in &self.set_fields {
+            set_fields_str.push_str(k);
+            set_fields_str.push_str("=");
+            set_fields_str.push_str(&*format!("{:?}", v));
+            set_fields_str.push_str(", ");
         }
 
-        if insert_fields_str.len() > 1 {
-            insert_fields_str.pop();
-            insert_fields_str.pop();
+        if set_fields_str.len() > 1 {
+            set_fields_str.pop();
+            set_fields_str.pop();
         }
 
-        insert_fields_str.push_str("]");
+        set_fields_str.push_str("]");
 
         let mut order_by_fields_str = String::new();
         for (order_by_field, order_by_value) in &self.order_by_fields {
@@ -111,8 +111,8 @@ impl Display for SqlStruct {
 
         write!(
             f,
-            "table_infos: {}, select_fields: {}, insert_fields: {}, order_by_fields: {}, limit: {:?}, offset: {:?}, where_exist: {}",
-            table_info_str, select_fields_str, insert_fields_str, order_by_fields_str, self.limit, self.offset, self.where_exist
+            "table_infos: {}, select_fields: {}, set_fields: {}, order_by_fields: {}, limit: {:?}, offset: {:?}, where_exist: {}",
+            table_info_str, select_fields_str, set_fields_str, order_by_fields_str, self.limit, self.offset, self.where_exist
         )
     }
 }
@@ -134,8 +134,6 @@ fn parse_select() -> Result<SqlStruct, Error> {
     let mut sql_struct = SqlStruct::default();
 
     if let Statement::Query(query) = statement {
-        // println!("SQL解析结果：{:?}\n", query);
-
         let Query {
             body,
             order_by,
@@ -155,11 +153,11 @@ fn parse_select() -> Result<SqlStruct, Error> {
             for select_item in select_expr_vec {
                 if let ast::SelectItem::UnnamedExpr(select_expr) = select_item {
                     if let Expr::Identifier(select_field_ident) = select_expr {
-                        sql_struct.select_fields.push(select_field_ident.value.clone());
+                        sql_struct.get_fields.push(select_field_ident.value.clone());
                     }
                 } else if let ast::SelectItem::ExprWithAlias { expr: select_expr, .. } = select_item {
                     if let Expr::Identifier(select_field_ident) = select_expr {
-                        sql_struct.select_fields.push(select_field_ident.value.clone());
+                        sql_struct.get_fields.push(select_field_ident.value.clone());
                     }
                 }
             }
@@ -199,13 +197,7 @@ fn parse_select() -> Result<SqlStruct, Error> {
                 }
             }
 
-            sql_struct.where_exist = {
-                if let Some(_where_expr) = where_expr {
-                    true
-                } else {
-                    false
-                }
-            };
+            sql_struct.where_exist = where_expr.is_some();
         }
 
         if let Some(limit_expr) = limit {
@@ -251,8 +243,6 @@ fn parse_insert() -> Result<SqlStruct, Error> {
     let statements = select_parse_result.unwrap();
     let statement = &statements[0];
 
-    println!("SQL解析结果：{:?}\n", statement);
-
     let mut sql_struct = SqlStruct::default();
 
     if let Statement::Insert { table_name: table_name_vec, columns, source: query, .. } = statement {
@@ -273,10 +263,10 @@ fn parse_insert() -> Result<SqlStruct, Error> {
 
         let mut insert_field_name_vec: Vec<String> = Vec::new();
 
-        sql_struct.insert_fields = HashMap::new();
+        sql_struct.set_fields = HashMap::new();
 
         for column in columns {
-            sql_struct.insert_fields.insert(column.value.clone(), MysqlValue::None);
+            sql_struct.set_fields.insert(column.value.clone(), MysqlValue::None);
             insert_field_name_vec.push(column.value.clone());
         }
 
@@ -294,16 +284,16 @@ fn parse_insert() -> Result<SqlStruct, Error> {
                         if let Expr::Value(value) = item {
                             if let ast::Value::Number(num_str, _) = value {
                                 let field_name = insert_field_name_vec.get(insert_field_index).unwrap();
-                                sql_struct.insert_fields.insert(field_name.clone(), MysqlValue::Number(num_str.parse::<u64>().unwrap()));
+                                sql_struct.set_fields.insert(field_name.clone(), MysqlValue::Number(num_str.parse::<u64>().unwrap()));
                                 insert_field_index = insert_field_index + 1;
                             } else if let ast::Value::SingleQuotedString(str_val) = value {
                                 let field_name = insert_field_name_vec.get(insert_field_index).unwrap();
                                 let s = str_val.clone();
-                                sql_struct.insert_fields.insert(field_name.clone(), MysqlValue::String(s));
+                                sql_struct.set_fields.insert(field_name.clone(), MysqlValue::String(s));
                                 insert_field_index = insert_field_index + 1;
                             } else if let ast::Value::Boolean(b) = value {
                                 let field_name = insert_field_name_vec.get(insert_field_index).unwrap();
-                                sql_struct.insert_fields.insert(field_name.clone(), MysqlValue::Boolean(*b));
+                                sql_struct.set_fields.insert(field_name.clone(), MysqlValue::Boolean(*b));
                                 insert_field_index = insert_field_index + 1;
                             }
                         }
@@ -328,17 +318,50 @@ fn parse_update() -> Result<SqlStruct, Error> {
     let statements = update_parse_result.unwrap();
     let statement = &statements[0];
 
-    println!("SQL解析结果：{:?}\n", statement);
-
     let mut sql_struct = SqlStruct::default();
     if let Statement::Update {
         table,
         assignments,
-        selection,
+        selection: where_expr,
         ..
     } = statement {
-        println!("table: {:?} \n assignments: {:?} \n selection: {:?} \n ",
-                 table, assignments, selection);
+        let table_relation = table.clone().relation;
+        if let TableFactor::Table { name: table_name_vec, .. } = table_relation {
+            let table_ident_vec = &table_name_vec.0;
+            let table_ident_len = table_ident_vec.len();
+            if table_ident_len == 2 {
+                sql_struct.table_infos.push(TableInfo {
+                    schema: table_ident_vec[0].value.clone(),
+                    table: table_ident_vec[1].value.clone(),
+                    ..Default::default()
+                });
+            } else if table_ident_len == 1 {
+                sql_struct.table_infos.push(TableInfo {
+                    table: table_ident_vec[0].value.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        sql_struct.set_fields = HashMap::new();
+
+        for assignment in assignments {
+            let key: &String = &assignment.id[0].value;
+            let value = &assignment.value;
+
+            if let Expr::Value(value) = value {
+                if let ast::Value::Number(num_str, _) = value {
+                    sql_struct.set_fields.insert(key.clone(), MysqlValue::Number(num_str.parse::<u64>().unwrap()));
+                } else if let ast::Value::SingleQuotedString(str_val) = value {
+                    let s = str_val.clone();
+                    sql_struct.set_fields.insert(key.clone(), MysqlValue::String(s));
+                } else if let ast::Value::Boolean(b) = value {
+                    sql_struct.set_fields.insert(key.clone(), MysqlValue::Boolean(*b));
+                }
+            }
+        }
+
+        sql_struct.where_exist = where_expr.is_some();
     };
 
     Ok(sql_struct)
