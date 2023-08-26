@@ -28,6 +28,10 @@ UPDATE TB1 SET NAME = 'name1', FLAG = false WHERE AGE > 10;
 
 ### 2.3 DELETE
 
+```sql
+DELETE FROM TB1 WHERE AGE > 10;
+```
+
 ## 3. DDL
 
 [13.1 Data Definition Statements](https://dev.mysql.com/doc/refman/8.0/en/sql-data-definition-statements.html)

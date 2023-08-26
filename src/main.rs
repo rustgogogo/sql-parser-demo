@@ -367,11 +367,67 @@ fn parse_update() -> Result<SqlStruct, Error> {
     Ok(sql_struct)
 }
 
+fn parse_delete() -> Result<SqlStruct, Error> {
+    let sql = "DELETE FROM TB1 WHERE AGE > 10;";
+    let select_parse_result: Result<Vec<Statement>, ParserError> = Parser::parse_sql(&DIALECT, sql);
+    if select_parse_result.is_err() {
+        let err_msg = select_parse_result.err().unwrap();
+        return Err(Error::msg(err_msg));
+    }
+
+    let statements = select_parse_result.unwrap();
+    let statement = &statements[0];
+
+    let mut sql_struct = SqlStruct::default();
+
+    if let Statement::Delete { from: table_expr_vec,selection: where_expr, .. } = statement {
+        for (index, table_expr) in table_expr_vec.iter().enumerate() {
+            let ast::TableWithJoins {
+                relation: table_factor,
+                ..
+            } = table_expr.deref();
+
+            if let TableFactor::Table {
+                name: object_name,
+                alias: alias_option,
+                ..
+            } = table_factor {
+                let table_ident_vec = &object_name.0;
+                let table_ident_len = table_ident_vec.len();
+                let alias_name = {
+                    if let Some(alias) = alias_option {
+                        &alias.name.value
+                    } else {
+                        ""
+                    }
+                };
+
+                let mut table_info = TableInfo::default();
+                table_info.index = index + 1;
+                table_info.alias = alias_name.to_string();
+                if table_ident_len == 2 {
+                    table_info.schema = table_ident_vec[0].value.clone();
+                    table_info.table = table_ident_vec[1].value.clone();
+                    sql_struct.table_infos.push(table_info);
+                } else if table_ident_len == 1 {
+                    table_info.table = table_ident_vec[0].value.clone();
+                    sql_struct.table_infos.push(table_info);
+                }
+            }
+        }
+
+        sql_struct.where_exist = where_expr.is_some();
+    }
+
+    Ok(sql_struct)
+}
+
 fn main() {
     let mut parser_func_map: HashMap<String, fn() -> Result<SqlStruct>> = HashMap::new();
     parser_func_map.insert("SELECT".to_string(), parse_select);
     parser_func_map.insert("INSERT".to_string(), parse_insert);
     parser_func_map.insert("UPDATE".to_string(), parse_update);
+    parser_func_map.insert("DELETE".to_string(), parse_delete);
 
     for (parser_type, parser_func) in parser_func_map {
         let parser_result = parser_func();
