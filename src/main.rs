@@ -380,7 +380,7 @@ fn parse_delete() -> Result<SqlStruct, Error> {
 
     let mut sql_struct = SqlStruct::default();
 
-    if let Statement::Delete { from: table_expr_vec,selection: where_expr, .. } = statement {
+    if let Statement::Delete { from: table_expr_vec, selection: where_expr, .. } = statement {
         for (index, table_expr) in table_expr_vec.iter().enumerate() {
             let ast::TableWithJoins {
                 relation: table_factor,
@@ -422,12 +422,52 @@ fn parse_delete() -> Result<SqlStruct, Error> {
     Ok(sql_struct)
 }
 
+fn parse_create() -> Result<SqlStruct, Error> {
+    let sql = "CREATE TABLE TB1 (ID INT PRIMARY KEY AUTO_INCREMENT, NAME VARCHAR(20) NOT NULL COMMENT '姓名', AGE INT, FLAG BOOLEAN);";
+    let create_parse_result: Result<Vec<Statement>, ParserError> = Parser::parse_sql(&DIALECT, sql);
+    if create_parse_result.is_err() {
+        let err_msg = create_parse_result.err().unwrap();
+        return Err(Error::msg(err_msg));
+    }
+
+    let statements = create_parse_result.unwrap();
+    let statement = &statements[0];
+
+    let mut sql_struct = SqlStruct::default();
+
+    if let Statement::CreateTable { name: table_name_vec, columns, .. } = statement {
+        let table_ident_vec = &table_name_vec.0;
+        let table_ident_len = table_ident_vec.len();
+        if table_ident_len == 2 {
+            sql_struct.table_infos.push(TableInfo {
+                schema: table_ident_vec[0].value.clone(),
+                table: table_ident_vec[1].value.clone(),
+                ..Default::default()
+            });
+        } else if table_ident_len == 1 {
+            sql_struct.table_infos.push(TableInfo {
+                table: table_ident_vec[0].value.clone(),
+                ..Default::default()
+            });
+        }
+
+        sql_struct.set_fields = HashMap::new();
+
+        for column in columns {
+            sql_struct.set_fields.insert(column.name.value.clone(), MysqlValue::None);
+        }
+    }
+
+    Ok(sql_struct)
+}
+
 fn main() {
     let mut parser_func_map: HashMap<String, fn() -> Result<SqlStruct>> = HashMap::new();
     parser_func_map.insert("SELECT".to_string(), parse_select);
     parser_func_map.insert("INSERT".to_string(), parse_insert);
     parser_func_map.insert("UPDATE".to_string(), parse_update);
     parser_func_map.insert("DELETE".to_string(), parse_delete);
+    parser_func_map.insert("CREATE".to_string(), parse_create);
 
     for (parser_type, parser_func) in parser_func_map {
         let parser_result = parser_func();
