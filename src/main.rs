@@ -6,7 +6,7 @@ use std::ops::Deref;
 
 use anyhow::{Error, Result};
 use sqlparser::ast;
-use sqlparser::ast::{Expr, OrderByExpr, Query, Select, SetExpr, Statement, TableFactor};
+use sqlparser::ast::{AlterTableOperation, Expr, OrderByExpr, Query, Select, SetExpr, Statement, TableFactor};
 use sqlparser::dialect::MySqlDialect;
 use sqlparser::parser::{Parser, ParserError};
 
@@ -461,6 +461,43 @@ fn parse_create() -> Result<SqlStruct, Error> {
     Ok(sql_struct)
 }
 
+fn parse_alter() -> Result<SqlStruct, Error> {
+    let sql = "ALTER TABLE TB1 ADD CREATE_TIME DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间';";
+    let alter_parse_result: Result<Vec<Statement>, ParserError> = Parser::parse_sql(&DIALECT, sql);
+    if alter_parse_result.is_err() {
+        let err_msg = alter_parse_result.err().unwrap();
+        return Err(Error::msg(err_msg));
+    }
+
+    let statements = alter_parse_result.unwrap();
+    let statement = &statements[0];
+
+    let mut sql_struct = SqlStruct::default();
+
+    if let Statement::AlterTable { name: table_name_vec, operation } = statement {
+        let table_ident_vec = &table_name_vec.0;
+        let table_ident_len = table_ident_vec.len();
+        if table_ident_len == 2 {
+            sql_struct.table_infos.push(TableInfo {
+                schema: table_ident_vec[0].value.clone(),
+                table: table_ident_vec[1].value.clone(),
+                ..Default::default()
+            });
+        } else if table_ident_len == 1 {
+            sql_struct.table_infos.push(TableInfo {
+                table: table_ident_vec[0].value.clone(),
+                ..Default::default()
+            });
+        }
+
+        if let AlterTableOperation::AddColumn { column_def, .. } = operation {
+            sql_struct.set_fields.insert(column_def.name.value.clone(), MysqlValue::None);
+        }
+    }
+
+    Ok(sql_struct)
+}
+
 fn main() {
     let mut parser_func_map: HashMap<String, fn() -> Result<SqlStruct>> = HashMap::new();
     parser_func_map.insert("SELECT".to_string(), parse_select);
@@ -468,6 +505,7 @@ fn main() {
     parser_func_map.insert("UPDATE".to_string(), parse_update);
     parser_func_map.insert("DELETE".to_string(), parse_delete);
     parser_func_map.insert("CREATE".to_string(), parse_create);
+    parser_func_map.insert("ALTER".to_string(), parse_alter);
 
     for (parser_type, parser_func) in parser_func_map {
         let parser_result = parser_func();
