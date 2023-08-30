@@ -55,3 +55,7 @@ DROP TABLE TB1;
 ```
 
 ### 3.4 TRUNCATE
+
+```sql
+TRUNCATE TABLE TB1;
+```

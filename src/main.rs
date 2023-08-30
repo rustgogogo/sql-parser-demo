@@ -532,6 +532,37 @@ fn parse_drop() -> Result<SqlStruct, Error> {
     Ok(sql_struct)
 }
 
+fn parse_truncate() -> Result<SqlStruct, Error> {
+    let sql = "TRUNCATE TABLE TB1;";
+    let truncate_parse_result: Result<Vec<Statement>, ParserError> = Parser::parse_sql(&DIALECT, sql);
+    if truncate_parse_result.is_err() {
+        let err_msg = truncate_parse_result.err().unwrap();
+        return Err(Error::msg(err_msg));
+    }
+
+    let statements = truncate_parse_result.unwrap();
+    let statement = &statements[0];
+
+    let mut sql_struct = SqlStruct::default();
+
+    if let Statement::Truncate { table_name: object_name, .. } = statement {
+        let table_ident_len = object_name.0.len();
+        if table_ident_len == 2 {
+            sql_struct.table_infos.push(TableInfo {
+                schema: object_name.0[0].value.clone(),
+                table: object_name.0[1].value.clone(),
+                ..Default::default()
+            });
+        } else if table_ident_len == 1 {
+            sql_struct.table_infos.push(TableInfo {
+                table: object_name.0[0].value.clone(),
+                ..Default::default()
+            });
+        }
+    }
+
+    Ok(sql_struct)
+}
 
 fn main() {
     let mut parser_func_map: HashMap<String, fn() -> Result<SqlStruct>> = HashMap::new();
@@ -542,6 +573,7 @@ fn main() {
     parser_func_map.insert("CREATE".to_string(), parse_create);
     parser_func_map.insert("ALTER".to_string(), parse_alter);
     parser_func_map.insert("DROP".to_string(), parse_drop);
+    parser_func_map.insert("TRUNCATE".to_string(), parse_truncate);
 
     for (parser_type, parser_func) in parser_func_map {
         let parser_result = parser_func();
